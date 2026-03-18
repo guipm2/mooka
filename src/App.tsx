@@ -25,7 +25,8 @@ import {
   Loader2,
   Globe,
   TrendingUp,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -39,10 +40,23 @@ interface Project {
   id: string;
   type: 'strategy' | 'logo' | 'mockup';
   url?: string;
-  data?: any;
+  data?: {
+    style?: string;
+    product?: string;
+    strategy?: BrandStrategy;
+    [key: string]: any;
+  };
   name: string;
   timestamp: number;
 }
+
+interface HealthResponse {
+  aiConfigured?: boolean;
+  authRequired?: boolean;
+  supabaseAuthConfigured?: boolean;
+}
+
+const LOCAL_PROJECTS_KEY = 'mooka_local_projects_v1';
 
 // --- Components ---
 
@@ -65,6 +79,9 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [isAIConfigured, setIsAIConfigured] = useState(true);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [supabaseAuthConfigured, setSupabaseAuthConfigured] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
   
   // Branding State
   const [concept, setConcept] = useState('');
@@ -72,6 +89,28 @@ export default function App() {
   const [activeLogo, setActiveLogo] = useState<string | null>(null);
   const [mockups, setMockups] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+
+  const showError = (message: string) => setFeedback({ type: 'error', message });
+  const showSuccess = (message: string) => setFeedback({ type: 'success', message });
+
+  const loadLocalProjects = () => {
+    try {
+      const raw = localStorage.getItem(LOCAL_PROJECTS_KEY);
+      if (!raw) return [] as Project[];
+      const parsed = JSON.parse(raw) as Project[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [] as Project[];
+    }
+  };
+
+  const saveLocalProjects = (nextProjects: Project[]) => {
+    try {
+      localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(nextProjects));
+    } catch {
+      // Ignore storage quota errors in local mode.
+    }
+  };
 
   const loadProjects = async (userId: string) => {
     if (!isSupabaseConfigured) return;
@@ -103,6 +142,26 @@ export default function App() {
     }
   };
 
+  const deleteProject = async (project: Project) => {
+    setProjects((prev) => {
+      const next = prev.filter((item) => item.id !== project.id);
+      if (!isSupabaseConfigured) saveLocalProjects(next);
+      return next;
+    });
+
+    if (session?.user && isSupabaseConfigured) {
+      const { error } = await supabase
+        .from('projects')
+        .delete()
+        .eq('id', project.id)
+        .eq('user_id', session.user.id);
+
+      if (error) {
+        showError(`Falha ao excluir projeto: ${error.message}`);
+      }
+    }
+  };
+
   // Persistence
   const saveProject = async (project: Omit<Project, 'id' | 'timestamp'>) => {
     const newProject: Project = {
@@ -115,7 +174,7 @@ export default function App() {
 
     if (session?.user && isSupabaseConfigured) {
       try {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('projects')
           .insert([{ 
             user_id: session.user.id,
@@ -123,23 +182,52 @@ export default function App() {
             name: project.name,
             data: project.data,
             url: project.url
-          }]);
-        if (error) console.warn('Failed to save to Supabase:', error.message);
-      } catch (e) {
+          }])
+          .select('id, created_at')
+          .single();
+
+        if (error) {
+          console.warn('Failed to save to Supabase:', error.message);
+          showError(`Não foi possível salvar no histórico: ${error.message}`);
+          return;
+        }
+
+        if (data?.id) {
+          setProjects((prev) => prev.map((item) => (
+            item.id === newProject.id
+              ? {
+                  ...item,
+                  id: data.id,
+                  timestamp: data.created_at ? new Date(data.created_at).getTime() : item.timestamp,
+                }
+              : item
+          )));
+        }
+      } catch {
         console.warn('Supabase table might not exist yet.');
       }
+    } else {
+      setProjects((prev) => {
+        saveLocalProjects(prev);
+        return prev;
+      });
     }
   };
 
   useEffect(() => {
     fetch('/api/health')
       .then((response) => response.json())
-      .then((data) => setIsAIConfigured(Boolean(data?.aiConfigured)))
+      .then((data: HealthResponse) => {
+        setIsAIConfigured(Boolean(data?.aiConfigured));
+        setAuthRequired(Boolean(data?.authRequired));
+        setSupabaseAuthConfigured(Boolean(data?.supabaseAuthConfigured));
+      })
       .catch(() => setIsAIConfigured(false));
   }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
+      setProjects(loadLocalProjects());
       setView('dashboard'); // Allow using the app without Supabase (local only)
       return;
     }
@@ -168,6 +256,11 @@ export default function App() {
 
   const handleGenerateStrategy = async () => {
     if (!concept) return;
+    if (authRequired && !session) {
+      showError('Faça login para gerar estratégias com autenticação ativa.');
+      setView('auth');
+      return;
+    }
     setIsGenerating(true);
     setLoadingMessage("Analisando o mercado e tendências globais...");
     try {
@@ -179,8 +272,10 @@ export default function App() {
         data: result
       });
       setView('strategy');
+      showSuccess('Estratégia gerada com sucesso.');
     } catch (error) {
-      console.error(error);
+      const message = error instanceof Error ? error.message : 'Falha ao gerar estratégia.';
+      showError(message);
     } finally {
       setIsGenerating(false);
     }
@@ -188,6 +283,11 @@ export default function App() {
 
   const handleGenerateLogo = async (style: string) => {
     if (!strategy) return;
+    if (authRequired && !session) {
+      showError('Faça login para gerar logo com autenticação ativa.');
+      setView('auth');
+      return;
+    }
     setIsGenerating(true);
     setLoadingMessage("Esculpindo sua identidade visual...");
     try {
@@ -197,11 +297,13 @@ export default function App() {
         type: 'logo',
         url: logoUrl,
         name: `Logo ${strategy.name} (${style})`,
-        data: { style }
+        data: { style, strategy }
       });
       setView('identity');
+      showSuccess('Logo gerado com sucesso.');
     } catch (error) {
-      console.error(error);
+      const message = error instanceof Error ? error.message : 'Falha ao gerar logo.';
+      showError(message);
     } finally {
       setIsGenerating(false);
     }
@@ -209,6 +311,11 @@ export default function App() {
 
   const handleGenerateMockup = async (product: string) => {
     if (!activeLogo || !strategy) return;
+    if (authRequired && !session) {
+      showError('Faça login para gerar mockups com autenticação ativa.');
+      setView('auth');
+      return;
+    }
     setIsGenerating(true);
     setLoadingMessage(`Criando mockup de ${product} ultra-realista...`);
     try {
@@ -218,11 +325,13 @@ export default function App() {
         type: 'mockup',
         url: mockupUrl,
         name: `Mockup ${product} - ${strategy.name}`,
-        data: { product }
+        data: { product, strategy }
       });
       setView('mockups');
+      showSuccess('Mockup gerado com sucesso.');
     } catch (error) {
-      console.error(error);
+      const message = error instanceof Error ? error.message : 'Falha ao gerar mockup.';
+      showError(message);
     } finally {
       setIsGenerating(false);
     }
@@ -263,6 +372,14 @@ export default function App() {
           <div className="bg-amber-500 text-brand-dark px-4 py-2 rounded-full text-[10px] font-bold flex items-center gap-2 shadow-xl">
             <ShieldCheck className="w-3 h-3" />
             MODO OFFLINE: CONFIGURE SUPABASE PARA SALVAR PROJETOS
+          </div>
+        </div>
+      )}
+
+      {authRequired && !isSupabaseConfigured && (
+        <div className="fixed top-16 right-4 z-[200]">
+          <div className="bg-red-500 text-white px-4 py-2 rounded-lg text-[10px] font-bold shadow-xl max-w-xs">
+            AUTH ATIVA NO BACKEND: configure SUPABASE_URL/SUPABASE_ANON_KEY e faça login para gerar com IA.
           </div>
         </div>
       )}
@@ -599,9 +716,11 @@ export default function App() {
                               onClick={() => {
                                 if (project.type === 'logo') {
                                   setActiveLogo(project.url!);
+                                  if (project.data?.strategy) setStrategy(project.data.strategy);
                                   setView('identity');
                                 } else if (project.type === 'mockup') {
                                   setMockups(prev => [project.url!, ...prev]);
+                                  if (project.data?.strategy) setStrategy(project.data.strategy);
                                   setView('mockups');
                                 }
                               }}
@@ -628,17 +747,25 @@ export default function App() {
                           <span className="text-[10px] text-neutral-600">{new Date(project.timestamp).toLocaleDateString()}</span>
                         </div>
                         <h4 className="text-sm font-bold text-white truncate">{project.name}</h4>
-                        {project.type === 'strategy' && (
-                          <button 
-                            onClick={() => {
-                              setStrategy(project.data);
-                              setView('strategy');
-                            }}
-                            className="text-[10px] font-bold text-brand-primary hover:underline"
+                        <div className="flex items-center justify-between">
+                          {project.type === 'strategy' && (
+                            <button 
+                              onClick={() => {
+                                setStrategy(project.data as BrandStrategy);
+                                setView('strategy');
+                              }}
+                              className="text-[10px] font-bold text-brand-primary hover:underline"
+                            >
+                              Ver Estratégia Completa
+                            </button>
+                          )}
+                          <button
+                            onClick={() => deleteProject(project)}
+                            className="text-[10px] font-bold text-red-400 hover:text-red-300 transition-colors"
                           >
-                            Ver Estratégia Completa
+                            Excluir
                           </button>
-                        )}
+                        </div>
                       </div>
                     </motion.div>
                   ))}
@@ -677,7 +804,7 @@ export default function App() {
                         </div>
                       </div>
                       <button className="px-6 py-2 bg-brand-primary/10 border border-brand-primary/30 text-brand-primary text-xs font-bold rounded-lg hover:bg-brand-primary hover:text-brand-dark transition-all">
-                        CONECTAR MCP
+                        MCP GERENCIADO NO BACKEND
                       </button>
                     </div>
 
@@ -732,6 +859,29 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {feedback && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-6 right-6 z-[210]"
+          >
+            <div className={`glass rounded-xl px-4 py-3 min-w-[280px] border ${feedback.type === 'error' ? 'border-red-500/40' : 'border-emerald-500/40'}`}>
+              <div className="flex items-start gap-3">
+                <div className={`text-xs font-black uppercase tracking-wider ${feedback.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {feedback.type === 'error' ? 'Erro' : 'Sucesso'}
+                </div>
+                <p className="text-sm text-neutral-200 flex-1 leading-relaxed">{feedback.message}</p>
+                <button onClick={() => setFeedback(null)} className="text-neutral-500 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -754,7 +904,7 @@ function AuthView() {
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        alert('Verifique seu e-mail para confirmar o cadastro!');
+        alert('Verifique seu e-mail para confirmar o cadastro.');
       }
     } catch (error: any) {
       alert(error.message);

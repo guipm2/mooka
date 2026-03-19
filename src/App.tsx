@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, 
   LayoutDashboard, 
@@ -22,41 +22,139 @@ import {
   ArrowRight,
   Download,
   Trash2,
-  Loader2,
   Globe,
   TrendingUp,
   ShieldCheck,
-  X
+  X,
+  SlidersHorizontal,
+  Check,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { BrandService, BrandStrategy } from './services/BrandService';
+import { BrandService, BrandStrategy, BrandPersonalization } from './services/BrandService';
+import { NavItem } from './components/ui/NavItem';
+import { FeatureCard } from './components/ui/FeatureCard';
+import { StatCard } from './components/ui/StatCard';
+import { Section } from './components/ui/Section';
+import { AuthView } from './components/auth/AuthView';
+import { BriefingChatPanel } from './components/dashboard/BriefingChatPanel';
+import { BrandControlsPanel } from './components/dashboard/BrandControlsPanel';
+import { RecentProjectsPanel } from './components/dashboard/RecentProjectsPanel';
+import { HistoryProjectsGrid } from './components/history/HistoryProjectsGrid';
+import { IdentityView } from './components/identity/IdentityView';
+import { AppSidebar } from './components/layout/AppSidebar';
+import { AppTopHeader } from './components/layout/AppTopHeader';
+import { MockupsView } from './components/mockups/MockupsView';
+import { FeedbackToast } from './components/overlays/FeedbackToast';
+import { LoadingOverlay } from './components/overlays/LoadingOverlay';
+import { SettingsModal } from './components/overlays/SettingsModal';
+import { StrategyView } from './components/strategy/StrategyView';
+import {
+  BriefingAnswers,
+  ChatMessage,
+  ChatSessionSnapshot,
+  FavoritePreset,
+  HealthResponse,
+  Project,
+  SegmentPreset,
+  ViewMode,
+} from './types/app';
 
 // --- Types ---
 
-type ViewMode = 'auth' | 'dashboard' | 'strategy' | 'identity' | 'mockups' | 'history';
-
-interface Project {
-  id: string;
-  type: 'strategy' | 'logo' | 'mockup';
-  url?: string;
-  data?: {
-    style?: string;
-    product?: string;
-    strategy?: BrandStrategy;
-    [key: string]: any;
-  };
-  name: string;
-  timestamp: number;
-}
-
-interface HealthResponse {
-  aiConfigured?: boolean;
-  authRequired?: boolean;
-  supabaseAuthConfigured?: boolean;
-}
-
 const LOCAL_PROJECTS_KEY = 'mooka_local_projects_v1';
+const FAVORITE_PRESETS_KEY = 'mooka_favorite_presets_v1';
+const CHAT_LONG_MEMORY_KEY = 'mooka_chat_long_memory_v1';
+
+const createDefaultPersonalization = (): BrandPersonalization => ({
+  controlLevel: 'auto',
+  brandVibe: [],
+});
+
+const PALETTE_OPTIONS = ['Auto (IA recomenda)', 'Quente', 'Fria', 'Terrosa', 'Pastel', 'Luxuosa', 'Alto contraste'];
+const ARCHETYPE_OPTIONS = ['Inovadora', 'Confiável', 'Minimalista', 'Premium', 'Acolhedora', 'Ousada'];
+const VIBE_OPTIONS = ['Moderna', 'Humana', 'Sofisticada', 'Divertida', 'Tecnológica', 'Sustentável'];
+const TYPOGRAPHY_OPTIONS = ['Neutra', 'Geométrica', 'Elegante', 'Orgânica', 'Impactante'];
+const MOCKUP_SCENE_OPTIONS = ['Estúdio limpo', 'Lifestyle urbano', 'Corporate premium', 'Criativo colorido', 'Minimal escandinavo'];
+
+type InferredBriefing = {
+  palettePreference?: string;
+  identityArchetype?: string;
+  typographyMood?: string;
+  mockupScene?: string;
+  controlLevel?: BrandPersonalization['controlLevel'];
+  logoElements?: string;
+  avoidElements?: string;
+  vibes: string[];
+  briefingUpdates: Partial<BriefingAnswers>;
+};
+
+const SEGMENT_PRESETS: SegmentPreset[] = [
+  {
+    id: 'saas',
+    title: 'SaaS B2B',
+    description: 'Tecnologia confiável e moderna para empresas.',
+    conceptHint: 'Plataforma SaaS para gestão e produtividade de equipes com foco em resultados.',
+    personalization: {
+      controlLevel: 'guided',
+      palettePreference: 'Fria',
+      identityArchetype: 'Confiável',
+      brandVibe: ['Tecnológica', 'Moderna'],
+      typographyMood: 'Geométrica',
+      mockupScene: 'Corporate premium',
+    },
+  },
+  {
+    id: 'fashion',
+    title: 'Moda & Lifestyle',
+    description: 'Marca autoral, visual forte e aspiracional.',
+    conceptHint: 'Marca de moda contemporânea com peças exclusivas e forte identidade visual.',
+    personalization: {
+      controlLevel: 'guided',
+      palettePreference: 'Luxuosa',
+      identityArchetype: 'Premium',
+      brandVibe: ['Sofisticada', 'Moderna'],
+      typographyMood: 'Elegante',
+      mockupScene: 'Lifestyle urbano',
+    },
+  },
+  {
+    id: 'food',
+    title: 'Food & Beverage',
+    description: 'Presença acolhedora e memorável para consumo.',
+    conceptHint: 'Marca de alimentos e bebidas com proposta artesanal e experiência acolhedora.',
+    personalization: {
+      controlLevel: 'guided',
+      palettePreference: 'Quente',
+      identityArchetype: 'Acolhedora',
+      brandVibe: ['Humana', 'Divertida'],
+      typographyMood: 'Orgânica',
+      mockupScene: 'Criativo colorido',
+    },
+  },
+  {
+    id: 'health',
+    title: 'Saúde & Bem-estar',
+    description: 'Clareza, confiança e sensação de cuidado.',
+    conceptHint: 'Serviço de saúde e bem-estar focado em prevenção, confiança e cuidado contínuo.',
+    personalization: {
+      controlLevel: 'guided',
+      palettePreference: 'Pastel',
+      identityArchetype: 'Confiável',
+      brandVibe: ['Humana', 'Sustentável'],
+      typographyMood: 'Neutra',
+      mockupScene: 'Estúdio limpo',
+    },
+  },
+];
+
+const DEFAULT_BRIEFING_ANSWERS: BriefingAnswers = {
+  positioning: 'acessivel',
+  audience: 'geral',
+  personality: 'confiavel',
+  visual: 'equilibrado',
+};
 
 // --- Components ---
 
@@ -86,9 +184,552 @@ export default function App() {
   // Branding State
   const [concept, setConcept] = useState('');
   const [strategy, setStrategy] = useState<BrandStrategy | null>(null);
+  const [personalization, setPersonalization] = useState<BrandPersonalization>(createDefaultPersonalization());
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [favoritePresets, setFavoritePresets] = useState<FavoritePreset[]>([]);
+  const [editingFavoriteId, setEditingFavoriteId] = useState<string | null>(null);
+  const [editingFavoriteName, setEditingFavoriteName] = useState('');
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: 'assistant-intro',
+      role: 'assistant',
+      text: 'Olá. Eu sou sua diretora criativa de IA. Me conte o que sua marca faz e o sentimento que você quer transmitir.',
+    },
+  ]);
+  const [chatMemory, setChatMemory] = useState<string[]>([]);
+  const [enableLongChatMemory, setEnableLongChatMemory] = useState(true);
+  const [isAssistantTyping, setIsAssistantTyping] = useState(false);
+  const [showBriefingAssistant, setShowBriefingAssistant] = useState(false);
+  const [briefingAnswers, setBriefingAnswers] = useState<BriefingAnswers>(DEFAULT_BRIEFING_ANSWERS);
   const [activeLogo, setActiveLogo] = useState<string | null>(null);
   const [mockups, setMockups] = useState<string[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const typingIntervalRef = useRef<number | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const isGuidedPersonalization = personalization.controlLevel !== 'auto';
+  const isDetailedPersonalization = personalization.controlLevel === 'detailed';
+
+  const updatePersonalization = <K extends keyof BrandPersonalization>(
+    key: K,
+    value: BrandPersonalization[K],
+  ) => {
+    setPersonalization((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const toggleVibe = (vibe: string) => {
+    setPersonalization((prev) => {
+      const current = prev.brandVibe || [];
+      const exists = current.includes(vibe);
+      return {
+        ...prev,
+        brandVibe: exists ? current.filter((item) => item !== vibe) : [...current, vibe],
+      };
+    });
+  };
+
+  const mergeUnique = (base: string[] = [], incoming: string[] = []) => Array.from(new Set([...base, ...incoming]));
+
+  const getChatSessionSnapshot = (): ChatSessionSnapshot => ({
+    messages: chatMessages.slice(-12),
+    memory: chatMemory.slice(-6),
+  });
+
+  const restoreChatSessionSnapshot = (snapshot?: ChatSessionSnapshot) => {
+    if (!snapshot?.messages?.length) return;
+    setChatMessages(snapshot.messages);
+    setChatMemory(snapshot.memory || []);
+  };
+
+  const inferBriefingFromText = (text: string): InferredBriefing => {
+    const normalized = text.toLowerCase();
+    const vibes: string[] = [];
+    const briefingUpdates: Partial<BriefingAnswers> = {};
+
+    const hasAny = (keywords: string[]) => keywords.some((keyword) => normalized.includes(keyword));
+
+    const inferred: InferredBriefing = {
+      vibes,
+      briefingUpdates,
+    };
+
+    if (hasAny(['premium', 'luxo', 'sofisticad'])) {
+      inferred.palettePreference = 'Luxuosa';
+      inferred.identityArchetype = 'Premium';
+      inferred.mockupScene = 'Corporate premium';
+      vibes.push('Sofisticada');
+      briefingUpdates.positioning = 'premium';
+    }
+
+    if (hasAny(['tecnologia', 'tech', 'saas', 'inov', 'digital'])) {
+      inferred.identityArchetype = inferred.identityArchetype || 'Inovadora';
+      inferred.palettePreference = inferred.palettePreference || 'Fria';
+      inferred.typographyMood = inferred.typographyMood || 'Geométrica';
+      vibes.push('Tecnológica', 'Moderna');
+      briefingUpdates.audience = briefingUpdates.audience || 'corporativo';
+    }
+
+    if (hasAny(['acess', 'popular', 'simples', 'humana', 'próxim'])) {
+      inferred.identityArchetype = inferred.identityArchetype || 'Acolhedora';
+      inferred.palettePreference = inferred.palettePreference || 'Pastel';
+      vibes.push('Humana');
+      briefingUpdates.positioning = briefingUpdates.positioning || 'acessivel';
+    }
+
+    if (hasAny(['sustent', 'eco', 'natureza', 'orgân'])) {
+      inferred.palettePreference = inferred.palettePreference || 'Terrosa';
+      inferred.typographyMood = inferred.typographyMood || 'Orgânica';
+      inferred.logoElements = inferred.logoElements || 'Elementos orgânicos e referência à natureza';
+      vibes.push('Sustentável');
+      briefingUpdates.positioning = briefingUpdates.positioning || 'sustentavel';
+    }
+
+    if (hasAny(['jovem', 'gen z', 'descolad', 'trendy'])) {
+      vibes.push('Divertida', 'Moderna');
+      briefingUpdates.audience = 'jovem';
+    }
+
+    if (hasAny(['corporativo', 'empresa', 'b2b'])) {
+      vibes.push('Confiável');
+      briefingUpdates.audience = 'corporativo';
+    }
+
+    if (hasAny(['família', 'famílias', 'infantil'])) {
+      vibes.push('Humana');
+      briefingUpdates.audience = 'familias';
+    }
+
+    if (hasAny(['ousad', 'disrupt', 'fora da caixa', 'impact'])) {
+      inferred.palettePreference = inferred.palettePreference || 'Alto contraste';
+      inferred.identityArchetype = inferred.identityArchetype || 'Ousada';
+      inferred.controlLevel = 'detailed';
+      vibes.push('Ousada');
+      briefingUpdates.personality = 'ousada';
+      briefingUpdates.positioning = briefingUpdates.positioning || 'disruptiva';
+    }
+
+    if (hasAny(['minimal', 'clean', 'elegante', 'sofistic'])) {
+      inferred.typographyMood = inferred.typographyMood || 'Elegante';
+      inferred.avoidElements = 'Excesso de detalhes, visual poluído, texturas complexas';
+      briefingUpdates.visual = 'clean';
+      if (!briefingUpdates.personality) briefingUpdates.personality = 'sofisticada';
+    }
+
+    if (hasAny(['amig', 'acolhed', 'leve'])) {
+      briefingUpdates.personality = briefingUpdates.personality || 'amigavel';
+    }
+
+    if (hasAny(['confi', 'segur', 'credib'])) {
+      briefingUpdates.personality = briefingUpdates.personality || 'confiavel';
+      vibes.push('Confiável');
+    }
+
+    if (hasAny(['mockup', 'produto', 'lifestyle', 'urbano', 'estúdio'])) {
+      if (hasAny(['lifestyle', 'urbano'])) inferred.mockupScene = 'Lifestyle urbano';
+      if (hasAny(['estúdio', 'studio'])) inferred.mockupScene = inferred.mockupScene || 'Estúdio limpo';
+    }
+
+    inferred.vibes = Array.from(new Set(vibes));
+    return inferred;
+  };
+
+  const applyInferredBriefing = (inferred: InferredBriefing) => {
+    const hasSignals = Boolean(
+      inferred.palettePreference ||
+      inferred.identityArchetype ||
+      inferred.typographyMood ||
+      inferred.mockupScene ||
+      inferred.logoElements ||
+      inferred.avoidElements ||
+      inferred.vibes.length ||
+      Object.keys(inferred.briefingUpdates).length,
+    );
+
+    if (!hasSignals) return false;
+
+    setPersonalization((prev) => ({
+      ...prev,
+      controlLevel: inferred.controlLevel || (prev.controlLevel === 'auto' ? 'guided' : prev.controlLevel),
+      palettePreference: inferred.palettePreference || prev.palettePreference,
+      identityArchetype: inferred.identityArchetype || prev.identityArchetype,
+      typographyMood: inferred.typographyMood || prev.typographyMood,
+      mockupScene: inferred.mockupScene || prev.mockupScene,
+      logoElements: inferred.logoElements || prev.logoElements,
+      avoidElements: inferred.avoidElements || prev.avoidElements,
+      brandVibe: mergeUnique(prev.brandVibe || [], inferred.vibes),
+    }));
+
+    if (Object.keys(inferred.briefingUpdates).length > 0) {
+      setBriefingAnswers((prev) => ({ ...prev, ...inferred.briefingUpdates }));
+    }
+
+    return true;
+  };
+
+  const buildContextualAssistantReply = (latestUserText: string, appliedSignals: boolean, memory: string[]) => {
+    const contextualBase = appliedSignals
+      ? 'Captei sua intenção e já atualizei automaticamente as preferências de branding com base no histórico da conversa.'
+      : 'Entendi seu ponto. Ainda não detectei sinais fortes o suficiente para ajustar automaticamente a direção visual.';
+
+    const shortMemory = memory.slice(-2).map((item) => item.slice(0, 90)).join(' | ');
+    const suggestion = appliedSignals
+      ? 'Se quiser, posso refinar mais: descreva uma referência visual ou diga o que você quer evitar no logo.'
+      : 'Me diga 2 coisas: qual sensação sua marca deve transmitir e qual estilo visual você não quer.';
+
+    return `${contextualBase}\nResumo recente: ${shortMemory || latestUserText.slice(0, 100)}\n${suggestion}`;
+  };
+
+  const pushChatMessage = (role: ChatMessage['role'], text: string) => {
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).slice(2, 9),
+        role,
+        text,
+      },
+    ].slice(-12));
+  };
+
+  const streamAssistantMessage = (fullText: string) => {
+    if (typingIntervalRef.current) {
+      window.clearInterval(typingIntervalRef.current);
+      typingIntervalRef.current = null;
+    }
+
+    const id = Math.random().toString(36).slice(2, 9);
+    let cursor = 0;
+    setIsAssistantTyping(true);
+
+    setChatMessages((prev) => [
+      ...prev,
+      { id, role: 'assistant', text: '' },
+    ].slice(-12));
+
+    typingIntervalRef.current = window.setInterval(() => {
+      cursor += 2;
+      const next = fullText.slice(0, cursor);
+
+      setChatMessages((prev) => prev.map((item) => (
+        item.id === id ? { ...item, text: next } : item
+      )));
+
+      if (cursor >= fullText.length) {
+        if (typingIntervalRef.current) {
+          window.clearInterval(typingIntervalRef.current);
+          typingIntervalRef.current = null;
+        }
+        setIsAssistantTyping(false);
+      }
+    }, 20);
+  };
+
+  const applyPreset = (preset: SegmentPreset) => {
+    setPersonalization((prev) => ({
+      ...createDefaultPersonalization(),
+      ...preset.personalization,
+      brandVibe: mergeUnique(prev.brandVibe, preset.personalization.brandVibe),
+    }));
+    setSelectedPresetId(preset.id);
+    if (!concept.trim()) setConcept(preset.conceptHint);
+    showSuccess(`Preset "${preset.title}" aplicado.`);
+    streamAssistantMessage(`Ótima escolha. Apliquei o preset ${preset.title}. Você já pode gerar a estratégia ou ajustar detalhes finos abaixo.`);
+  };
+
+  const applyBriefing = () => {
+    const next: BrandPersonalization = {
+      controlLevel: briefingAnswers.visual === 'expressivo' ? 'detailed' : 'guided',
+      brandVibe: [],
+    };
+
+    if (briefingAnswers.positioning === 'premium') {
+      next.identityArchetype = 'Premium';
+      next.palettePreference = 'Luxuosa';
+      next.mockupScene = 'Corporate premium';
+      next.brandVibe = mergeUnique(next.brandVibe, ['Sofisticada']);
+    }
+    if (briefingAnswers.positioning === 'disruptiva') {
+      next.identityArchetype = 'Ousada';
+      next.palettePreference = 'Alto contraste';
+      next.brandVibe = mergeUnique(next.brandVibe, ['Moderna', 'Tecnológica']);
+    }
+    if (briefingAnswers.positioning === 'acessivel') {
+      next.identityArchetype = 'Acolhedora';
+      next.palettePreference = 'Pastel';
+      next.brandVibe = mergeUnique(next.brandVibe, ['Humana']);
+    }
+    if (briefingAnswers.positioning === 'sustentavel') {
+      next.identityArchetype = 'Confiável';
+      next.palettePreference = 'Terrosa';
+      next.typographyMood = 'Orgânica';
+      next.brandVibe = mergeUnique(next.brandVibe, ['Sustentável']);
+    }
+
+    if (briefingAnswers.audience === 'jovem') next.brandVibe = mergeUnique(next.brandVibe, ['Divertida', 'Moderna']);
+    if (briefingAnswers.audience === 'corporativo') next.brandVibe = mergeUnique(next.brandVibe, ['Confiável', 'Sofisticada']);
+    if (briefingAnswers.audience === 'familias') next.brandVibe = mergeUnique(next.brandVibe, ['Humana', 'Acolhedora']);
+
+    if (briefingAnswers.personality === 'amigavel') next.brandVibe = mergeUnique(next.brandVibe, ['Humana']);
+    if (briefingAnswers.personality === 'sofisticada') {
+      next.brandVibe = mergeUnique(next.brandVibe, ['Sofisticada']);
+      next.typographyMood = next.typographyMood || 'Elegante';
+    }
+    if (briefingAnswers.personality === 'ousada') {
+      next.brandVibe = mergeUnique(next.brandVibe, ['Ousada']);
+      next.identityArchetype = next.identityArchetype || 'Ousada';
+    }
+    if (briefingAnswers.personality === 'confiavel') {
+      next.brandVibe = mergeUnique(next.brandVibe, ['Confiável']);
+      next.identityArchetype = next.identityArchetype || 'Confiável';
+    }
+
+    if (briefingAnswers.visual === 'clean') {
+      next.avoidElements = 'Excesso de detalhes, visual poluído, texturas complexas';
+      next.typographyMood = next.typographyMood || 'Neutra';
+    }
+    if (briefingAnswers.visual === 'equilibrado') {
+      next.typographyMood = next.typographyMood || 'Geométrica';
+    }
+    if (briefingAnswers.visual === 'expressivo') {
+      next.logoElements = 'Composição marcante com símbolo protagonista';
+      next.palettePreference = next.palettePreference || 'Alto contraste';
+    }
+
+    setPersonalization((prev) => ({
+      ...prev,
+      ...next,
+      brandVibe: mergeUnique(prev.brandVibe, next.brandVibe),
+    }));
+    setSelectedPresetId(null);
+    setShowBriefingAssistant(false);
+    showSuccess('Briefing aplicado às preferências de branding.');
+    streamAssistantMessage('Briefing aplicado com sucesso. Direção estratégica atualizada para refletir suas respostas.');
+  };
+
+  const resetPersonalization = () => {
+    setPersonalization(createDefaultPersonalization());
+    setSelectedPresetId(null);
+    setBriefingAnswers(DEFAULT_BRIEFING_ANSWERS);
+    setShowBriefingAssistant(false);
+    showSuccess('Preferências redefinidas para modo automático.');
+    streamAssistantMessage('Tudo certo. Voltei para o modo automático para você começar com uma folha em branco.');
+  };
+
+  const loadFavoritePresets = () => {
+    try {
+      const raw = localStorage.getItem(FAVORITE_PRESETS_KEY);
+      if (!raw) return [] as FavoritePreset[];
+      const parsed = JSON.parse(raw) as FavoritePreset[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [] as FavoritePreset[];
+    }
+  };
+
+  const saveFavoritePresets = (next: FavoritePreset[]) => {
+    try {
+      localStorage.setItem(FAVORITE_PRESETS_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore local storage quota issues.
+    }
+  };
+
+  const loadLongMemoryPreference = () => {
+    try {
+      const raw = localStorage.getItem(CHAT_LONG_MEMORY_KEY);
+      if (!raw) return true;
+      return raw === 'true';
+    } catch {
+      return true;
+    }
+  };
+
+  const saveLongMemoryPreference = (enabled: boolean) => {
+    try {
+      localStorage.setItem(CHAT_LONG_MEMORY_KEY, String(enabled));
+    } catch {
+      // Ignore local storage quota issues.
+    }
+  };
+
+  const applyFavoritePreset = (preset: FavoritePreset) => {
+    setPersonalization({
+      ...createDefaultPersonalization(),
+      ...preset.personalization,
+      brandVibe: preset.personalization.brandVibe || [],
+    });
+    setSelectedPresetId(null);
+    if (!concept.trim() && preset.conceptHint) setConcept(preset.conceptHint);
+    showSuccess(`Favorito "${preset.name}" aplicado.`);
+    streamAssistantMessage(`Favorito ${preset.name} aplicado. Se quiser, eu também posso refinar essa direção com seu novo objetivo.`);
+  };
+
+  const removeFavoritePreset = (id: string) => {
+    setFavoritePresets((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      saveFavoritePresets(next);
+      return next;
+    });
+  };
+
+  const renameFavoritePreset = () => {
+    if (!editingFavoriteId) return;
+    const cleanName = editingFavoriteName.trim();
+    if (!cleanName) {
+      showError('Informe um nome válido para o favorito.');
+      return;
+    }
+
+    setFavoritePresets((prev) => {
+      const next = prev.map((item) => (
+        item.id === editingFavoriteId ? { ...item, name: cleanName } : item
+      ));
+      saveFavoritePresets(next);
+      return next;
+    });
+
+    setEditingFavoriteId(null);
+    setEditingFavoriteName('');
+    showSuccess('Nome do favorito atualizado.');
+  };
+
+  const updateFavoriteFromCurrent = (id: string) => {
+    const payload = getPersonalizationPayload();
+    if (!payload) {
+      showError('Ative ao menos o modo Guiado para atualizar o favorito.');
+      return;
+    }
+
+    setFavoritePresets((prev) => {
+      const next = prev.map((item) => (
+        item.id === id
+          ? {
+              ...item,
+              personalization: payload,
+              conceptHint: concept.trim(),
+              createdAt: Date.now(),
+            }
+          : item
+      ));
+      saveFavoritePresets(next);
+      return next;
+    });
+
+    showSuccess('Favorito atualizado com sua configuração atual.');
+  };
+
+  const saveCurrentAsFavorite = () => {
+    const payload = getPersonalizationPayload();
+    if (!payload) {
+      showError('Ative ao menos o modo Guiado para salvar um favorito.');
+      return;
+    }
+
+    const favorite: FavoritePreset = {
+      id: Math.random().toString(36).slice(2, 9),
+      name: payload.identityArchetype || payload.palettePreference || 'Preset personalizado',
+      conceptHint: concept.trim(),
+      personalization: payload,
+      createdAt: Date.now(),
+    };
+
+    setFavoritePresets((prev) => {
+      const next = [favorite, ...prev].slice(0, 8);
+      saveFavoritePresets(next);
+      return next;
+    });
+
+    showSuccess('Preset salvo em Favoritos.');
+    streamAssistantMessage('Preset salvo em Favoritos. Agora você pode reutilizar essa direção com um clique.');
+  };
+
+  const submitChatConcept = () => {
+    const next = chatDraft.trim();
+    if (!next) return;
+
+    const nextMemory = [...chatMemory, next].slice(-6);
+    pushChatMessage('user', next);
+    setChatMemory(nextMemory);
+    setConcept((prev) => (prev ? `${prev}\n${next}` : next));
+    setChatDraft('');
+
+    const inferred = inferBriefingFromText(nextMemory.join(' '));
+    const appliedSignals = applyInferredBriefing(inferred);
+    streamAssistantMessage(buildContextualAssistantReply(next, appliedSignals, nextMemory));
+  };
+
+  const clearChatSession = () => {
+    setChatMemory([]);
+    setChatMessages([
+      {
+        id: 'assistant-intro-reset',
+        role: 'assistant',
+        text: 'Sessão reiniciada. Me conte novamente o que você está construindo e qual sensação sua marca deve passar.',
+      },
+    ]);
+    setChatDraft('');
+  };
+
+  const openProject = (project: Project) => {
+    if (project.type === 'strategy') {
+      setStrategy(project.data as BrandStrategy);
+      setPersonalization(project.data?.personalization || createDefaultPersonalization());
+      restoreChatSessionSnapshot(project.data?.chatSession);
+      setView('strategy');
+      return;
+    }
+
+    if (project.type === 'logo' && project.url) {
+      setActiveLogo(project.url);
+      if (project.data?.strategy) setStrategy(project.data.strategy);
+      setPersonalization(project.data?.personalization || createDefaultPersonalization());
+      restoreChatSessionSnapshot(project.data?.chatSession);
+      setView('identity');
+      return;
+    }
+
+    if (project.type === 'mockup' && project.url) {
+      setMockups((prev) => [project.url!, ...prev]);
+      if (project.data?.strategy) setStrategy(project.data.strategy);
+      setPersonalization(project.data?.personalization || createDefaultPersonalization());
+      restoreChatSessionSnapshot(project.data?.chatSession);
+      setView('mockups');
+    }
+  };
+
+  const getPersonalizationPayload = (): BrandPersonalization | undefined => {
+    if (personalization.controlLevel === 'auto') return undefined;
+
+    const payload: BrandPersonalization = {
+      controlLevel: personalization.controlLevel,
+    };
+
+    if (personalization.palettePreference?.trim()) payload.palettePreference = personalization.palettePreference.trim();
+    if (personalization.customPalette?.trim()) payload.customPalette = personalization.customPalette.trim();
+    if (personalization.identityArchetype?.trim()) payload.identityArchetype = personalization.identityArchetype.trim();
+    if (personalization.brandVibe?.length) payload.brandVibe = personalization.brandVibe;
+    if (personalization.typographyMood?.trim()) payload.typographyMood = personalization.typographyMood.trim();
+    if (personalization.logoElements?.trim()) payload.logoElements = personalization.logoElements.trim();
+    if (personalization.avoidElements?.trim()) payload.avoidElements = personalization.avoidElements.trim();
+    if (personalization.mockupScene?.trim()) payload.mockupScene = personalization.mockupScene.trim();
+
+    return payload;
+  };
+
+  const personalizationSummary = (() => {
+    const payload = getPersonalizationPayload();
+    if (!payload) return [] as string[];
+
+    const chips: string[] = [];
+    if (payload.palettePreference) chips.push(`Paleta: ${payload.palettePreference}`);
+    if (payload.identityArchetype) chips.push(`Identidade: ${payload.identityArchetype}`);
+    if (payload.brandVibe?.length) chips.push(`Vibe: ${payload.brandVibe.join(', ')}`);
+    if (payload.typographyMood) chips.push(`Tipografia: ${payload.typographyMood}`);
+    if (payload.logoElements) chips.push(`Elementos: ${payload.logoElements}`);
+    if (payload.avoidElements) chips.push(`Evitar: ${payload.avoidElements}`);
+    if (payload.mockupScene) chips.push(`Cena: ${payload.mockupScene}`);
+    return chips;
+  })();
 
   const showError = (message: string) => setFeedback({ type: 'error', message });
   const showSuccess = (message: string) => setFeedback({ type: 'success', message });
@@ -226,6 +867,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    setFavoritePresets(loadFavoritePresets());
+    setEnableLongChatMemory(loadLongMemoryPreference());
+
     if (!isSupabaseConfigured) {
       setProjects(loadLocalProjects());
       setView('dashboard'); // Allow using the app without Supabase (local only)
@@ -254,6 +898,22 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [chatMessages, isAssistantTyping]);
+
+  useEffect(() => {
+    saveLongMemoryPreference(enableLongChatMemory);
+  }, [enableLongChatMemory]);
+
+  useEffect(() => {
+    return () => {
+      if (typingIntervalRef.current) {
+        window.clearInterval(typingIntervalRef.current);
+      }
+    };
+  }, []);
+
   const handleGenerateStrategy = async () => {
     if (!concept) return;
     if (authRequired && !session) {
@@ -264,12 +924,17 @@ export default function App() {
     setIsGenerating(true);
     setLoadingMessage("Analisando o mercado e tendências globais...");
     try {
-      const result = await BrandService.generateStrategy(concept);
+      const personalizationPayload = getPersonalizationPayload();
+      const result = await BrandService.generateStrategy(concept, personalizationPayload);
       setStrategy(result);
       await saveProject({
         type: 'strategy',
         name: result.name,
-        data: result
+        data: {
+          ...result,
+          personalization: personalizationPayload,
+          chatSession: enableLongChatMemory ? getChatSessionSnapshot() : undefined,
+        }
       });
       setView('strategy');
       showSuccess('Estratégia gerada com sucesso.');
@@ -291,13 +956,19 @@ export default function App() {
     setIsGenerating(true);
     setLoadingMessage("Esculpindo sua identidade visual...");
     try {
-      const logoUrl = await BrandService.generateLogo(strategy.name, strategy, style);
+      const personalizationPayload = getPersonalizationPayload();
+      const logoUrl = await BrandService.generateLogo(strategy.name, strategy, style, personalizationPayload);
       setActiveLogo(logoUrl);
       await saveProject({
         type: 'logo',
         url: logoUrl,
         name: `Logo ${strategy.name} (${style})`,
-        data: { style, strategy }
+        data: {
+          style,
+          strategy,
+          personalization: personalizationPayload,
+          chatSession: enableLongChatMemory ? getChatSessionSnapshot() : undefined,
+        }
       });
       setView('identity');
       showSuccess('Logo gerado com sucesso.');
@@ -319,13 +990,19 @@ export default function App() {
     setIsGenerating(true);
     setLoadingMessage(`Criando mockup de ${product} ultra-realista...`);
     try {
-      const mockupUrl = await BrandService.generateMockup(activeLogo, product, strategy.name);
+      const personalizationPayload = getPersonalizationPayload();
+      const mockupUrl = await BrandService.generateMockup(activeLogo, product, strategy.name, personalizationPayload);
       setMockups(prev => [mockupUrl, ...prev]);
       await saveProject({
         type: 'mockup',
         url: mockupUrl,
         name: `Mockup ${product} - ${strategy.name}`,
-        data: { product, strategy }
+        data: {
+          product,
+          strategy,
+          personalization: personalizationPayload,
+          chatSession: enableLongChatMemory ? getChatSessionSnapshot() : undefined,
+        }
       });
       setView('mockups');
       showSuccess('Mockup gerado com sucesso.');
@@ -337,7 +1014,7 @@ export default function App() {
     }
   };
 
-  if (view === 'auth' && isSupabaseConfigured) return <AuthView />;
+  if (view === 'auth' && isSupabaseConfigured) return <AuthView logo={<Logo />} />;
 
   if (!isAIConfigured) {
     return (
@@ -365,7 +1042,24 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-brand-dark font-sans">
+    <div className="flex h-screen overflow-hidden bg-brand-dark font-sans relative premium-bg">
+      <div className="pointer-events-none absolute inset-0 z-0">
+        <motion.div
+          className="orb orb-a"
+          animate={{ x: [0, 40, 0], y: [0, -30, 0] }}
+          transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="orb orb-b"
+          animate={{ x: [0, -35, 0], y: [0, 24, 0] }}
+          transition={{ duration: 18, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="orb orb-c"
+          animate={{ x: [0, 28, 0], y: [0, 20, 0] }}
+          transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      </div>
       
       {!isSupabaseConfigured && (
         <div className="fixed top-4 right-4 z-[200] animate-bounce">
@@ -384,56 +1078,21 @@ export default function App() {
         </div>
       )}
       
-      {/* Sidebar Navigation */}
-      <aside className="w-64 border-r border-brand-border flex flex-col bg-brand-surface/50 backdrop-blur-md">
-        <div className="p-6">
-          <Logo />
-        </div>
-        
-        <nav className="flex-1 px-4 space-y-2 py-4">
-          <NavItem active={view === 'dashboard'} onClick={() => setView('dashboard')} icon={LayoutDashboard} label="Dashboard" />
-          <NavItem active={view === 'strategy'} onClick={() => setView('strategy')} icon={Target} label="Estratégia" disabled={!strategy} />
-          <NavItem active={view === 'identity'} onClick={() => setView('identity')} icon={Palette} label="Identidade" disabled={!activeLogo} />
-          <NavItem active={view === 'mockups'} onClick={() => setView('mockups')} icon={Layers} label="Mockups" disabled={!activeLogo} />
-          <NavItem active={view === 'history'} onClick={() => setView('history')} icon={History} label="Histórico" />
-          <NavItem active={showSettings} onClick={() => setShowSettings(true)} icon={Settings} label="Configurações" />
-        </nav>
-
-        <div className="p-4 border-t border-brand-border space-y-4">
-          <div className="flex items-center gap-3 px-4 py-2">
-            <div className="w-8 h-8 rounded-full bg-brand-primary/20 flex items-center justify-center border border-brand-primary/30">
-              <User className="w-4 h-4 text-brand-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-white truncate">{session?.user?.email}</p>
-              <p className="text-[10px] text-neutral-500">Plano Enterprise</p>
-            </div>
-          </div>
-          <button 
-            onClick={() => isSupabaseConfigured ? supabase.auth.signOut() : setSession(null)}
-            className="w-full flex items-center gap-2 px-4 py-2 text-xs font-bold text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
-          >
-            <LogOut className="w-4 h-4" />
-            Sair da Plataforma
-          </button>
-        </div>
-      </aside>
+      <AppSidebar
+        logo={<Logo />}
+        view={view === 'auth' ? 'dashboard' : view}
+        showSettings={showSettings}
+        hasStrategy={Boolean(strategy)}
+        hasActiveLogo={Boolean(activeLogo)}
+        userEmail={session?.user?.email}
+        onSetView={(nextView) => setView(nextView)}
+        onOpenSettings={() => setShowSettings(true)}
+        onSignOut={() => (isSupabaseConfigured ? supabase.auth.signOut() : setSession(null))}
+      />
 
       {/* Main Content */}
-      <main className="flex-1 relative overflow-y-auto">
-        <header className="h-16 border-b border-brand-border flex items-center justify-between px-8 sticky top-0 bg-brand-dark/80 backdrop-blur-md z-20">
-          <div className="flex items-center gap-2 text-sm text-neutral-400">
-            <span>Mooka Intelligence</span>
-            <ChevronRight className="w-4 h-4" />
-            <span className="text-white font-medium capitalize">{view}</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1 bg-brand-primary/10 border border-brand-primary/20 rounded-full">
-              <div className="w-2 h-2 rounded-full bg-brand-primary animate-pulse" />
-              <span className="text-[10px] font-bold text-brand-primary uppercase tracking-widest">AI Engine Online</span>
-            </div>
-          </div>
-        </header>
+      <main className="flex-1 relative overflow-y-auto z-10">
+        <AppTopHeader viewLabel={view} />
 
         <div className="p-8 max-w-6xl mx-auto">
           <AnimatePresence mode="wait">
@@ -441,23 +1100,76 @@ export default function App() {
             {view === 'dashboard' && (
               <motion.div key="dash" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-12">
                 <div className="space-y-4">
-                  <h2 className="text-4xl font-display font-bold text-white">Bem-vindo ao Futuro do Branding</h2>
+                  <h2 className="text-4xl md:text-5xl font-display font-bold text-white leading-tight">Crie sua marca com direção criativa de alto nível</h2>
                   <p className="text-neutral-400 max-w-2xl">
-                    Nossa IA não apenas desenha, ela pensa. Analisamos tendências globais em tempo real para posicionar sua marca no topo.
+                    Você conduz cada escolha e a IA executa com precisão. Simples para iniciantes, poderoso para quem quer controle total.
                   </p>
                 </div>
 
-                <div className="glass rounded-[2.5rem] p-12 border-brand-primary/20 relative overflow-hidden">
+                <div className="glass premium-panel rounded-[2.5rem] p-6 md:p-10 border-brand-primary/20 relative overflow-hidden">
                   <div className="relative z-10 space-y-8">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-brand-primary uppercase tracking-[0.2em]">O que você está construindo?</label>
-                      <textarea 
-                        value={concept}
-                        onChange={(e) => setConcept(e.target.value)}
-                        placeholder="Descreva seu negócio, valores e o que te torna único..."
-                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-6 text-xl text-white outline-none focus:border-brand-primary transition-all min-h-[150px]"
-                      />
-                    </div>
+                    <BriefingChatPanel
+                      chatMessages={chatMessages}
+                      isAssistantTyping={isAssistantTyping}
+                      enableLongChatMemory={enableLongChatMemory}
+                      onToggleLongMemory={() => setEnableLongChatMemory((prev) => !prev)}
+                      onClearChat={clearChatSession}
+                      chatDraft={chatDraft}
+                      onChangeChatDraft={setChatDraft}
+                      onSubmitChat={submitChatConcept}
+                      quickPrompts={[
+                        'Quero uma marca premium e minimalista para consultoria de tecnologia',
+                        'Minha marca precisa parecer acessível, humana e confiável',
+                        'Busco identidade ousada para público jovem e digital',
+                      ]}
+                      onUseQuickPrompt={(prompt) => setChatDraft(prompt)}
+                      chatMemory={chatMemory}
+                      chatScrollRef={chatScrollRef}
+                    />
+
+                    <BrandControlsPanel
+                      segmentPresets={SEGMENT_PRESETS}
+                      selectedPresetId={selectedPresetId}
+                      onApplyPreset={(presetId) => {
+                        const preset = SEGMENT_PRESETS.find((item) => item.id === presetId);
+                        if (preset) applyPreset(preset);
+                      }}
+                      onResetPersonalization={resetPersonalization}
+                      favoritePresets={favoritePresets}
+                      editingFavoriteId={editingFavoriteId}
+                      editingFavoriteName={editingFavoriteName}
+                      onEditingFavoriteNameChange={setEditingFavoriteName}
+                      onStartRenameFavorite={(presetId) => {
+                        const preset = favoritePresets.find((item) => item.id === presetId);
+                        if (!preset) return;
+                        setEditingFavoriteId(preset.id);
+                        setEditingFavoriteName(preset.name);
+                      }}
+                      onSaveFavoriteName={renameFavoritePreset}
+                      onSaveCurrentAsFavorite={saveCurrentAsFavorite}
+                      onApplyFavoritePreset={(presetId) => {
+                        const preset = favoritePresets.find((item) => item.id === presetId);
+                        if (preset) applyFavoritePreset(preset);
+                      }}
+                      onUpdateFavoriteFromCurrent={updateFavoriteFromCurrent}
+                      onRemoveFavoritePreset={removeFavoritePreset}
+                      showBriefingAssistant={showBriefingAssistant}
+                      onToggleBriefingAssistant={() => setShowBriefingAssistant((prev) => !prev)}
+                      briefingAnswers={briefingAnswers}
+                      onBriefingAnswersChange={setBriefingAnswers}
+                      onApplyBriefing={applyBriefing}
+                      personalization={personalization}
+                      isGuidedPersonalization={isGuidedPersonalization}
+                      isDetailedPersonalization={isDetailedPersonalization}
+                      onUpdatePersonalization={updatePersonalization}
+                      onToggleVibe={toggleVibe}
+                      paletteOptions={PALETTE_OPTIONS}
+                      archetypeOptions={ARCHETYPE_OPTIONS}
+                      vibeOptions={VIBE_OPTIONS}
+                      typographyOptions={TYPOGRAPHY_OPTIONS}
+                      mockupSceneOptions={MOCKUP_SCENE_OPTIONS}
+                    />
+
                     <button 
                       onClick={handleGenerateStrategy}
                       disabled={!concept || isGenerating}
@@ -493,202 +1205,41 @@ export default function App() {
                   <StatCard icon={TrendingUp} label="Trend Analysis" value="Active" />
                   <StatCard icon={ShieldCheck} label="Brand Protection" value="Secure" />
                 </div>
+
+                <RecentProjectsPanel
+                  projects={projects}
+                  onOpenProject={openProject}
+                  onViewHistory={() => setView('history')}
+                />
               </motion.div>
             )}
 
             {view === 'strategy' && strategy && (
-              <motion.div key="strat" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-3xl font-display font-bold text-white">Estratégia de Marca: <span className="text-brand-primary">{strategy.name}</span></h2>
-                  <button onClick={() => setView('dashboard')} className="text-xs font-bold text-neutral-500 hover:text-white transition-colors">Nova Análise</button>
-                </div>
-
-                <div className="grid grid-cols-12 gap-8">
-                  <div className="col-span-8 space-y-6">
-                    <div className="glass rounded-3xl p-8 space-y-6">
-                      <Section title="Tagline" content={strategy.tagline} icon={Sparkles} />
-                      <Section title="Missão" content={strategy.mission} icon={Target} />
-                      <Section title="Público-Alvo" content={strategy.targetAudience} icon={User} />
-                      <Section title="Tom de Voz" content={strategy.toneOfVoice} icon={MessageSquare} />
-                      
-                      <div className="space-y-4 pt-4 border-t border-white/5">
-                        <h4 className="text-xs font-bold text-brand-primary uppercase tracking-widest flex items-center gap-2">
-                          <Target className="w-4 h-4" />
-                          Principais Concorrentes
-                        </h4>
-                        <div className="flex flex-wrap gap-2">
-                          {strategy.competitors.map(comp => (
-                            <span key={comp} className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-[10px] text-neutral-400">
-                              {comp}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-span-4 space-y-6">
-                    <div className="glass rounded-3xl p-6 space-y-4">
-                      <h4 className="text-xs font-bold text-neutral-500 uppercase tracking-widest">Paleta Sugerida</h4>
-                      <div className="flex gap-2">
-                        {strategy.colorPalette.map(color => (
-                          <div key={color} className="w-full aspect-square rounded-xl border border-white/10" style={{ backgroundColor: color }} title={color} />
-                        ))}
-                      </div>
-                    </div>
-                    <div className="glass rounded-3xl p-6 space-y-4">
-                      <h4 className="text-xs font-bold text-neutral-500 uppercase tracking-widest">Tendências de Mercado</h4>
-                      <div className="space-y-2">
-                        {strategy.marketTrends.map(trend => (
-                          <div key={trend} className="flex items-center gap-2 text-xs text-neutral-400">
-                            <TrendingUp className="w-3 h-3 text-brand-primary" />
-                            {trend}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-center pt-8">
-                  <button 
-                    onClick={() => handleGenerateLogo('Minimalist')}
-                    className="px-12 py-5 bg-white text-brand-dark font-black rounded-2xl hover:bg-brand-primary transition-colors flex items-center gap-3"
-                  >
-                    PROSSEGUIR PARA IDENTIDADE VISUAL
-                    <ArrowRight className="w-5 h-5" />
-                  </button>
-                </div>
-              </motion.div>
+              <StrategyView
+                strategy={strategy}
+                personalizationSummary={personalizationSummary}
+                onBackToDashboard={() => setView('dashboard')}
+                onProceedToIdentity={() => handleGenerateLogo('Minimalist')}
+              />
             )}
 
             {view === 'identity' && activeLogo && strategy && (
-              <motion.div key="identity" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-12">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-3xl font-display font-bold text-white">Identidade Visual</h2>
-                  <div className="flex gap-4">
-                    <button onClick={() => setView('strategy')} className="text-xs font-bold text-neutral-500 hover:text-white transition-colors">Voltar para Estratégia</button>
-                    <button onClick={() => setView('mockups')} className="px-6 py-2 bg-brand-primary text-brand-dark font-bold rounded-lg hover:brightness-110 transition-all">Ir para Mockups</button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-12 gap-12">
-                  <div className="col-span-6 space-y-8">
-                    <div className="glass rounded-[2rem] p-12 flex items-center justify-center relative group overflow-hidden">
-                      <img src={activeLogo} alt="Logo" className="w-full max-w-[300px] relative z-10" />
-                      <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
-                        <a href={activeLogo} download={`${strategy.name}-logo.png`} className="p-4 bg-brand-primary text-brand-dark rounded-full shadow-xl">
-                          <Download className="w-6 h-6" />
-                        </a>
-                      </div>
-                      <div className="absolute top-4 right-4 text-[10px] font-mono text-neutral-500 uppercase tracking-widest">Master Asset v1.0</div>
-                    </div>
-
-                    <div className="glass rounded-3xl p-8 space-y-6">
-                      <h4 className="text-xs font-bold text-brand-primary uppercase tracking-[0.2em]">Regenerar com Estilo</h4>
-                      <div className="grid grid-cols-3 gap-3">
-                        {['Minimalist', 'Modern Tech', 'Luxury', 'Playful', 'Brutalism'].map(style => (
-                          <button 
-                            key={style}
-                            onClick={() => handleGenerateLogo(style)}
-                            className="px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-[10px] font-bold text-neutral-400 hover:border-brand-primary hover:text-white transition-all"
-                          >
-                            {style}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="col-span-6 space-y-8">
-                    <div className="glass rounded-3xl p-8 space-y-8">
-                      <h3 className="text-xl font-display font-bold text-white">Brand Guidelines</h3>
-                      
-                      <div className="space-y-4">
-                        <h4 className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Tipografia Sugerida</h4>
-                        <div className="space-y-4">
-                          <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-                            <p className="text-2xl font-display text-white">Space Grotesk</p>
-                            <p className="text-[10px] text-neutral-500 mt-1 uppercase tracking-widest">Display & Headings</p>
-                          </div>
-                          <div className="p-4 bg-white/5 rounded-xl border border-white/10">
-                            <p className="text-lg font-sans text-white">Inter</p>
-                            <p className="text-[10px] text-neutral-500 mt-1 uppercase tracking-widest">Body & UI</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <h4 className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Uso Correto</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="p-4 bg-white rounded-xl flex items-center justify-center aspect-video">
-                            <img src={activeLogo} alt="Logo Light" className="w-16 opacity-80" />
-                          </div>
-                          <div className="p-4 bg-brand-dark rounded-xl flex items-center justify-center aspect-video border border-white/10">
-                            <img src={activeLogo} alt="Logo Dark" className="w-16 brightness-200" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <IdentityView
+                activeLogo={activeLogo}
+                strategy={strategy}
+                onBackToStrategy={() => setView('strategy')}
+                onGoToMockups={() => setView('mockups')}
+                onGenerateLogo={handleGenerateLogo}
+              />
             )}
 
             {view === 'mockups' && activeLogo && strategy && (
-              <motion.div key="mockups" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-12">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-3xl font-display font-bold text-white">Mockups de Produtos</h2>
-                  <button onClick={() => setView('identity')} className="text-xs font-bold text-neutral-500 hover:text-white transition-colors">Voltar para Identidade</button>
-                </div>
-
-                <div className="grid grid-cols-12 gap-12">
-                  <div className="col-span-4 space-y-6">
-                    <div className="glass rounded-3xl p-8 space-y-6">
-                      <h4 className="text-xs font-bold text-brand-primary uppercase tracking-[0.2em]">Selecione o Produto</h4>
-                      <div className="grid grid-cols-1 gap-3">
-                        {['T-Shirt', 'Hoodie', 'Cap', 'Mug', 'Tote Bag', 'Phone Case'].map(product => (
-                          <button 
-                            key={product}
-                            onClick={() => handleGenerateMockup(product)}
-                            className="w-full px-6 py-4 bg-white/5 border border-white/10 rounded-xl text-sm font-bold text-neutral-300 hover:bg-brand-primary hover:text-brand-dark hover:border-brand-primary transition-all flex items-center justify-between group"
-                          >
-                            {product}
-                            <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="col-span-8">
-                    <div className="grid grid-cols-1 gap-8">
-                      {mockups.length > 0 ? (
-                        mockups.map((url, i) => (
-                          <motion.div 
-                            key={url} 
-                            initial={{ opacity: 0, scale: 0.95 }} 
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="glass rounded-[2rem] overflow-hidden relative group"
-                          >
-                            <img src={url} alt={`Mockup ${i}`} className="w-full aspect-video object-cover" />
-                            <div className="absolute inset-0 bg-brand-dark/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
-                              <a href={url} download={`${strategy.name}-mockup-${i}.png`} className="px-8 py-4 bg-brand-primary text-brand-dark font-black rounded-xl flex items-center gap-2">
-                                <Download className="w-5 h-5" />
-                                DOWNLOAD MOCKUP HD
-                              </a>
-                            </div>
-                          </motion.div>
-                        ))
-                      ) : (
-                        <div className="h-[400px] glass rounded-[2rem] border-dashed border-white/10 flex flex-col items-center justify-center text-neutral-500 space-y-4">
-                          <Monitor className="w-12 h-12 opacity-20" />
-                          <p className="text-sm font-medium">Selecione um produto para gerar o primeiro mockup</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <MockupsView
+                mockups={mockups}
+                strategy={strategy}
+                onBackToIdentity={() => setView('identity')}
+                onGenerateMockup={handleGenerateMockup}
+              />
             )}
 
             {view === 'history' && (
@@ -701,334 +1252,25 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-6">
-                  {projects.map(project => (
-                    <motion.div 
-                      key={project.id}
-                      whileHover={{ y: -5 }}
-                      className="glass rounded-2xl overflow-hidden border-white/5 group"
-                    >
-                      {project.url ? (
-                        <div className="aspect-video bg-white/5 relative overflow-hidden">
-                          <img src={project.url} alt={project.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                          <div className="absolute inset-0 bg-brand-dark/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <button 
-                              onClick={() => {
-                                if (project.type === 'logo') {
-                                  setActiveLogo(project.url!);
-                                  if (project.data?.strategy) setStrategy(project.data.strategy);
-                                  setView('identity');
-                                } else if (project.type === 'mockup') {
-                                  setMockups(prev => [project.url!, ...prev]);
-                                  if (project.data?.strategy) setStrategy(project.data.strategy);
-                                  setView('mockups');
-                                }
-                              }}
-                              className="p-3 bg-white text-brand-dark rounded-full shadow-xl"
-                            >
-                              <ArrowRight className="w-5 h-5" />
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="aspect-video bg-brand-primary/10 flex items-center justify-center">
-                          <Target className="w-12 h-12 text-brand-primary opacity-30" />
-                        </div>
-                      )}
-                      <div className="p-5 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className={`text-[8px] font-bold uppercase tracking-widest px-2 py-1 rounded-full 
-                            ${project.type === 'strategy' ? 'bg-blue-500/20 text-blue-400' : 
-                              project.type === 'logo' ? 'bg-brand-primary/20 text-brand-primary' : 
-                              'bg-purple-500/20 text-purple-400'}`}
-                          >
-                            {project.type}
-                          </span>
-                          <span className="text-[10px] text-neutral-600">{new Date(project.timestamp).toLocaleDateString()}</span>
-                        </div>
-                        <h4 className="text-sm font-bold text-white truncate">{project.name}</h4>
-                        <div className="flex items-center justify-between">
-                          {project.type === 'strategy' && (
-                            <button 
-                              onClick={() => {
-                                setStrategy(project.data as BrandStrategy);
-                                setView('strategy');
-                              }}
-                              className="text-[10px] font-bold text-brand-primary hover:underline"
-                            >
-                              Ver Estratégia Completa
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deleteProject(project)}
-                            className="text-[10px] font-bold text-red-400 hover:text-red-300 transition-colors"
-                          >
-                            Excluir
-                          </button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-
-                  {projects.length === 0 && (
-                    <div className="col-span-3 h-64 glass rounded-3xl border-dashed border-white/10 flex flex-col items-center justify-center text-neutral-500 space-y-4">
-                      <History className="w-12 h-12 opacity-20" />
-                      <p className="text-sm font-medium">Nenhum projeto encontrado ainda.</p>
-                    </div>
-                  )}
-                </div>
+                <HistoryProjectsGrid
+                  projects={projects}
+                  onOpenProject={openProject}
+                  onDeleteProject={deleteProject}
+                />
               </motion.div>
             )}
 
-            {showSettings && (
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="fixed inset-0 z-[110] flex items-center justify-center p-8 bg-brand-dark/80 backdrop-blur-md">
-                <div className="glass w-full max-w-2xl rounded-[2.5rem] p-12 space-y-8 relative">
-                  <button onClick={() => setShowSettings(false)} className="absolute top-8 right-8 text-neutral-500 hover:text-white transition-colors">
-                    <Trash2 className="w-6 h-6 rotate-45" />
-                  </button>
-                  
-                  <div className="space-y-2">
-                    <h2 className="text-3xl font-display font-bold text-white">Configurações do Sistema</h2>
-                    <p className="text-neutral-500">Gerencie sua conexão com o ecossistema Mooka.</p>
-                  </div>
-
-                  <div className="space-y-6">
-                    <div className="p-6 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-brand-primary/20 rounded-xl flex items-center justify-center">
-                          <Globe className="w-6 h-6 text-brand-primary" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-white">Supabase MCP Connection</p>
-                          <p className="text-xs text-neutral-500">Conecte sua infraestrutura de dados avançada.</p>
-                        </div>
-                      </div>
-                      <button className="px-6 py-2 bg-brand-primary/10 border border-brand-primary/30 text-brand-primary text-xs font-bold rounded-lg hover:bg-brand-primary hover:text-brand-dark transition-all">
-                        MCP GERENCIADO NO BACKEND
-                      </button>
-                    </div>
-
-                    <div className="p-6 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-brand-primary/20 rounded-xl flex items-center justify-center">
-                          <ShieldCheck className="w-6 h-6 text-brand-primary" />
-                        </div>
-                        <div>
-                          <p className="font-bold text-white">Segurança de Dados</p>
-                          <p className="text-xs text-neutral-500">Criptografia ponta-a-ponta ativa.</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/20 rounded-full">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        <span className="text-[10px] font-bold text-emerald-500 uppercase">Ativo</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-8 flex justify-end">
-                    <button onClick={() => setShowSettings(false)} className="px-8 py-3 bg-white text-brand-dark font-bold rounded-xl">FECHAR</button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
+            <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
 
           </AnimatePresence>
         </div>
       </main>
 
-      {/* Global Loading Overlay */}
-      <AnimatePresence>
-        {isGenerating && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-brand-dark/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8">
-            <div className="relative w-40 h-40 mb-12">
-              <div className="absolute inset-0 border-2 border-brand-primary/10 rounded-full" />
-              <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity, ease: "linear" }} className="absolute inset-0 border-2 border-t-brand-primary rounded-full" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-20 h-20 bg-brand-primary/20 rounded-full blur-2xl animate-pulse" />
-                <Zap className="w-12 h-12 text-brand-primary relative z-10 fill-brand-primary" />
-              </div>
-            </div>
-            <motion.p key={loadingMessage} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-2xl font-display font-medium text-white text-center max-w-xl leading-relaxed">
-              {loadingMessage}
-            </motion.p>
-            <div className="mt-8 flex items-center gap-4 text-neutral-600">
-              <span className="text-[10px] font-mono uppercase tracking-[0.3em]">Neural Engine v3.1</span>
-              <div className="w-1 h-1 rounded-full bg-neutral-800" />
-              <span className="text-[10px] font-mono uppercase tracking-[0.3em]">Market Grounding Active</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <LoadingOverlay open={isGenerating} loadingMessage={loadingMessage} />
 
-      <AnimatePresence>
-        {feedback && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="fixed bottom-6 right-6 z-[210]"
-          >
-            <div className={`glass rounded-xl px-4 py-3 min-w-[280px] border ${feedback.type === 'error' ? 'border-red-500/40' : 'border-emerald-500/40'}`}>
-              <div className="flex items-start gap-3">
-                <div className={`text-xs font-black uppercase tracking-wider ${feedback.type === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
-                  {feedback.type === 'error' ? 'Erro' : 'Sucesso'}
-                </div>
-                <p className="text-sm text-neutral-200 flex-1 leading-relaxed">{feedback.message}</p>
-                <button onClick={() => setFeedback(null)} className="text-neutral-500 hover:text-white transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <FeedbackToast feedback={feedback} onClose={() => setFeedback(null)} />
     </div>
   );
 }
 
-// --- Sub-Views ---
 
-function AuthView() {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        alert('Verifique seu e-mail para confirmar o cadastro.');
-      }
-    } catch (error: any) {
-      alert(error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-brand-dark flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-brand-primary/20 blur-[150px] rounded-full" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-brand-primary/10 blur-[150px] rounded-full" />
-      </div>
-
-      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md relative z-10">
-        <div className="text-center mb-12">
-          <Logo />
-          <h2 className="text-2xl font-display font-bold text-white mt-8">Bem-vindo ao Mooka</h2>
-          <p className="text-neutral-500 mt-2">A plataforma definitiva para branding inteligente.</p>
-        </div>
-
-        <form onSubmit={handleAuth} className="glass rounded-3xl p-8 space-y-6">
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest ml-1">E-mail Corporativo</label>
-              <input 
-                type="email" 
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-brand-primary outline-none transition-all"
-                placeholder="nome@empresa.com"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest ml-1">Senha</label>
-              <input 
-                type="password" 
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-brand-primary outline-none transition-all"
-                placeholder="••••••••"
-              />
-            </div>
-          </div>
-
-          <button 
-            type="submit"
-            disabled={loading}
-            className="w-full py-4 bg-brand-primary text-brand-dark font-black rounded-xl hover:brightness-110 transition-all flex items-center justify-center gap-2"
-          >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isLogin ? 'ENTRAR NA PLATAFORMA' : 'CRIAR MINHA CONTA')}
-          </button>
-
-          <button 
-            type="button"
-            onClick={() => setIsLogin(!isLogin)}
-            className="w-full text-xs font-bold text-neutral-500 hover:text-white transition-colors"
-          >
-            {isLogin ? 'Não tem uma conta? Cadastre-se' : 'Já tem uma conta? Faça login'}
-          </button>
-        </form>
-      </motion.div>
-    </div>
-  );
-}
-
-// --- Helpers ---
-
-function NavItem({ active, onClick, icon: Icon, label, disabled }: any) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all group
-        ${active 
-          ? 'bg-brand-primary text-brand-dark font-bold shadow-lg shadow-brand-primary/20' 
-          : 'text-neutral-400 hover:text-white hover:bg-white/5 disabled:opacity-20 disabled:cursor-not-allowed'}
-      `}
-    >
-      <Icon className={`w-5 h-5 ${active ? 'text-brand-dark' : 'text-neutral-500 group-hover:text-brand-primary'}`} />
-      <span className="text-sm">{label}</span>
-    </button>
-  );
-}
-
-function FeatureCard({ icon: Icon, title, description }: any) {
-  return (
-    <div className="glass p-8 rounded-3xl border-white/5 space-y-4 hover:border-brand-primary/30 transition-colors group">
-      <div className="w-12 h-12 bg-brand-primary/10 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
-        <Icon className="w-6 h-6 text-brand-primary" />
-      </div>
-      <div className="space-y-2">
-        <h4 className="text-lg font-display font-bold text-white">{title}</h4>
-        <p className="text-sm text-neutral-500 leading-relaxed">{description}</p>
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ icon: Icon, label, value }: any) {
-  return (
-    <div className="glass p-6 rounded-2xl border-white/5 flex items-center gap-4">
-      <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center">
-        <Icon className="w-6 h-6 text-brand-primary" />
-      </div>
-      <div>
-        <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{label}</p>
-        <p className="text-lg font-display font-bold text-white">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, content, icon: Icon }: any) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2 text-brand-primary">
-        <Icon className="w-4 h-4" />
-        <h4 className="text-xs font-bold uppercase tracking-widest">{title}</h4>
-      </div>
-      <p className="text-neutral-300 leading-relaxed">{content}</p>
-    </div>
-  );
-}

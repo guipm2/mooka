@@ -24,6 +24,18 @@ type BrandStrategy = {
   competitors: string[];
 };
 
+type BrandPersonalization = {
+  controlLevel?: "auto" | "guided" | "detailed";
+  palettePreference?: string;
+  customPalette?: string;
+  identityArchetype?: string;
+  brandVibe?: string[];
+  typographyMood?: string;
+  logoElements?: string;
+  avoidElements?: string;
+  mockupScene?: string;
+};
+
 const PORT = Number(process.env.PORT || 3000);
 const isProduction = process.env.NODE_ENV === "production";
 const openAIKey = process.env.OPENAI_API_KEY || "";
@@ -82,6 +94,24 @@ function toDataUrl(base64Png: string): string {
 function getSafeError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Unexpected server error.";
+}
+
+function buildPersonalizationPrompt(personalization?: BrandPersonalization): string {
+  if (!personalization || personalization.controlLevel === "auto") return "";
+
+  const lines: string[] = [];
+  if (personalization.palettePreference) lines.push(`Preferred palette mood: ${personalization.palettePreference}`);
+  if (personalization.customPalette) lines.push(`Custom palette hints: ${personalization.customPalette}`);
+  if (personalization.identityArchetype) lines.push(`Identity archetype: ${personalization.identityArchetype}`);
+  if (personalization.brandVibe?.length) lines.push(`Brand vibe keywords: ${personalization.brandVibe.join(", ")}`);
+  if (personalization.typographyMood) lines.push(`Typography mood: ${personalization.typographyMood}`);
+  if (personalization.logoElements) lines.push(`Elements to include: ${personalization.logoElements}`);
+  if (personalization.avoidElements) lines.push(`Elements to avoid: ${personalization.avoidElements}`);
+  if (personalization.mockupScene) lines.push(`Preferred mockup scene: ${personalization.mockupScene}`);
+
+  if (lines.length === 0) return "";
+
+  return `\nPersonalization preferences (must influence result):\n- ${lines.join("\n- ")}`;
 }
 
 async function startServer() {
@@ -185,6 +215,7 @@ async function startServer() {
 
   app.post("/api/strategy", async (req, res) => {
     const concept = String(req.body?.concept || "").trim();
+    const personalization = req.body?.personalization as BrandPersonalization | undefined;
     if (!concept) {
       res.status(400).json({ error: "Brand concept is required." });
       return;
@@ -212,7 +243,7 @@ async function startServer() {
             content: [
               {
                 type: "input_text",
-                text: `Create a complete brand strategy for this concept: ${concept}`,
+                text: `Create a complete brand strategy for this concept: ${concept}${buildPersonalizationPrompt(personalization)}`,
               },
             ],
           },
@@ -281,6 +312,7 @@ async function startServer() {
     const brandName = String(req.body?.brandName || "").trim();
     const style = String(req.body?.style || "Minimalist").trim();
     const strategy = req.body?.strategy as BrandStrategy | undefined;
+    const personalization = req.body?.personalization as BrandPersonalization | undefined;
 
     if (!brandName || !strategy) {
       res.status(400).json({ error: "brandName and strategy are required." });
@@ -293,11 +325,13 @@ async function startServer() {
 
     try {
       const styleDetail = stylePrompts[style] || stylePrompts.Minimalist;
+      const personalizationPrompt = buildPersonalizationPrompt(personalization);
       const prompt = `Professional logo design for "${brandName}".
 Brand mission: ${strategy.mission}
 Target audience: ${strategy.targetAudience}
 Style direction: ${styleDetail}
 Color palette: ${strategy.colorPalette.join(", ")}
+    ${personalizationPrompt}
 Requirements: isolated on pure white background, centered composition, clean vector-like style, no watermark, no extra text.`;
 
       const image = await openai.images.generate({
@@ -321,6 +355,7 @@ Requirements: isolated on pure white background, centered composition, clean vec
     const logoBase64 = String(req.body?.logoBase64 || "");
     const product = String(req.body?.product || "").trim();
     const brandName = String(req.body?.brandName || "").trim();
+    const personalization = req.body?.personalization as BrandPersonalization | undefined;
 
     if (!logoBase64 || !product || !brandName) {
       res.status(400).json({ error: "logoBase64, product and brandName are required." });
@@ -337,9 +372,11 @@ Requirements: isolated on pure white background, centered composition, clean vec
       const file = await toFile(buffer, `logo.${extension}`, { type: mimeType });
 
       const productDetail = productPrompts[product] || `A professional mockup for ${product}.`;
+      const personalizationPrompt = buildPersonalizationPrompt(personalization);
       const prompt = `Create an ultra-realistic commercial mockup for the brand "${brandName}".
 Product: ${product}.
 Scene: ${productDetail}
+    ${personalizationPrompt}
 Integrate the provided logo naturally with correct perspective, material response, shadows and highlights.
 Output style: premium product photography.`;
 

@@ -13,6 +13,18 @@ export interface BrandStrategy {
   competitors: string[];
 }
 
+export interface BrandPersonalization {
+  controlLevel: 'auto' | 'guided' | 'detailed';
+  palettePreference?: string;
+  customPalette?: string;
+  identityArchetype?: string;
+  brandVibe?: string[];
+  typographyMood?: string;
+  logoElements?: string;
+  avoidElements?: string;
+  mockupScene?: string;
+}
+
 export const BrandService = {
   async buildHeaders(): Promise<Record<string, string>> {
     const headers: Record<string, string> = {
@@ -30,12 +42,12 @@ export const BrandService = {
     return headers;
   },
 
-  async generateStrategy(concept: string): Promise<BrandStrategy> {
+  async generateStrategy(concept: string, personalization?: BrandPersonalization): Promise<BrandStrategy> {
     const headers = await this.buildHeaders();
     const response = await fetch('/api/strategy', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ concept }),
+      body: JSON.stringify({ concept, personalization }),
     });
 
     if (!response.ok) {
@@ -46,12 +58,17 @@ export const BrandService = {
     return response.json();
   },
 
-  async generateLogo(brandName: string, strategy: BrandStrategy, style: string): Promise<string> {
+  async generateLogo(
+    brandName: string,
+    strategy: BrandStrategy,
+    style: string,
+    personalization?: BrandPersonalization,
+  ): Promise<string> {
     const headers = await this.buildHeaders();
     const response = await fetch('/api/logo', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ brandName, strategy, style }),
+      body: JSON.stringify({ brandName, strategy, style, personalization }),
     });
 
     if (!response.ok) {
@@ -64,12 +81,17 @@ export const BrandService = {
     return data.imageUrl;
   },
 
-  async generateMockup(logoBase64: string, product: string, brandName: string): Promise<string> {
+  async generateMockup(
+    logoBase64: string,
+    product: string,
+    brandName: string,
+    personalization?: BrandPersonalization,
+  ): Promise<string> {
     const headers = await this.buildHeaders();
     const response = await fetch('/api/mockup', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ logoBase64, product, brandName }),
+      body: JSON.stringify({ logoBase64, product, brandName, personalization }),
     });
 
     if (!response.ok) {
